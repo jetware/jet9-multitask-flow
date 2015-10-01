@@ -1,0 +1,28 @@
+
+USAGE
+
+	1. Copy jet9-multitask-init to /etc/jet9-multitask-init
+	2. Copy .init.sh to /etc/rc.d/.init.sh
+	3. Apply rc.patch to /etc/rc
+
+	This patch replaces sequential execution of late stage scripts with
+	parallel one. The `rcorder` is used only to select scripts by keywords,
+	but the real order jet9-multitask-init determines itself from scripts'
+	annotations with task_dependencies() function. The execution is done in
+	topologically order (strict partial order) defined by dependencies.
+
+	It supports REQUIRE, BEFORE and PROVIDE annotations.
+
+
+NOTE
+
+	The script defines some variables in the shell context and doesn't clean
+	it up before run_rc_script called. It can be fixed later.
+
+
+KNOWN LIMITATIONS
+
+	Script and dependency names should have only alphanumeric or underscore
+	chars, without hyphen, dot and others.
+
+	Scripts should be placed in single directory (/etc/rc.d)
