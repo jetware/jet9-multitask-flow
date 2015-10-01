@@ -1,0 +1,20 @@
+#!/bin/sh
+
+case "$1" in
+wait)
+	case "$2" in
+		start)
+			echo backend application apache php_fpm
+			;;
+		stop)
+			;;
+	esac
+	;;
+mark)
+	echo frontend
+	;;
+start)
+	;;
+stop)
+	;;
+esac

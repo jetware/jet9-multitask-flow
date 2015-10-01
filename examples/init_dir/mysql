@@ -1,0 +1,20 @@
+#!/bin/sh
+
+case "$1" in
+wait)
+	case "$2" in
+		start)
+			;;
+		stop)
+			echo application backend
+			;;
+	esac
+	;;
+mark)
+	echo database
+	;;
+start)
+	;;
+stop)
+	;;
+esac

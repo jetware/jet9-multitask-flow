@@ -1,0 +1,22 @@
+#!/bin/sh
+
+case "$1" in
+lead)
+	case "$2" in
+		start)
+			echo database backend
+			;;
+	esac
+	;;
+wait)
+	case "$2" in
+		stop)
+			echo database backend
+			;;
+	esac
+	;;
+start)
+	;;
+stop)
+	;;
+esac

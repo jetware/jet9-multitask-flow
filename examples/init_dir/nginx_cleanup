@@ -1,0 +1,28 @@
+#!/bin/sh
+
+case "$1" in
+lead)
+	case "$2" in
+		start)
+			echo nginx
+			;;
+		stop)
+			echo apache
+			;;
+	esac
+	;;
+wait)
+	case "$2" in
+		start)
+			echo apache
+			;;
+		stop)
+			echo nginx
+			;;
+	esac
+	;;
+start)
+	;;
+stop)
+	;;
+esac

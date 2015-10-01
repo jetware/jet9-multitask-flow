@@ -1,0 +1,44 @@
+#!/bin/sh
+
+case "$1" in
+
+wait)
+	case "$2" in
+		start)
+			echo
+			;;
+		stop)
+			echo
+			;
+	esac
+	;;
+
+lead)
+	case "$2" in
+		start)
+			echo
+			;;
+		stop)
+			echo
+			;;
+	esac
+	;;
+
+mark)
+	case "$2" in
+		start)
+			echo
+			;;
+		stop)
+			echo
+			;;
+	esac
+	;;
+
+start)
+	;;
+
+stop)
+	;;
+
+esac

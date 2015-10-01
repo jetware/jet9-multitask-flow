@@ -1,0 +1,354 @@
+#!/bin/sh
+# Copyright © 2014-2015 Cyril Vechera http://jet9.net
+# All rights reserved.
+# 
+# BSD-2
+# 
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions are met:
+# 
+# 1. Redistributions of source code must retain the above copyright notice,
+# this list of conditions and the following disclaimer.
+# 
+# 2. Redistributions in binary form must reproduce the above copyright notice,
+# this list of conditions and the following disclaimer in the documentation
+# and/or other materials provided with the distribution.
+# 
+# THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+# AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE
+# LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR
+# CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+# SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+# INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+# CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+# ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+# POSSIBILITY OF SUCH DAMAGE.
+
+dependency_init() {
+	local name
+	for name in "$@"; do
+		rm -f "$LOCK_DIR/$name"
+		mkfifo "$LOCK_DIR/$name"
+	done
+}
+
+dependency_wait() {
+	local name none
+	for name in "$@"; do
+		read none < "$LOCK_DIR/$name"
+	done 2>&-
+}
+
+dependency_mark() {
+	local name
+	for name in "$@"; do
+		mv "$LOCK_DIR/$name" "$LOCK_DIR/$name.done"
+		: <> "$LOCK_DIR/$name.done" 
+		rm -f "$LOCK_DIR/$name.done"
+	done
+}
+
+dependency_action() {
+	local script action
+	script="$1"
+	action="$2"
+
+	terminated() {
+		info "task $1 terminated"
+		if [ -n "$scriptpid" ]; then
+			verbose "kill script $1 with pid $scriptpid"
+			kill $scriptpid
+		fi
+	}
+
+	# dual trap used to echo output from normal exit context, where stderr is not closed
+	trap "trap 'terminated $script' EXIT; exit" INT TERM
+
+	"$INIT_DIR/$script" "$action" &
+	scriptpid=$!
+	wait
+}
+
+dependency_run() {
+	local script action
+	script="$1"
+	action="$2"
+
+	ID="$MARK -> $WAIT"
+
+	verbose "task: $script, wait: $WAIT, ($ID)"
+	dependency_wait $WAIT
+
+	if [ -n "$script" ]; then
+		output "$script"
+
+		if [ -z "$dry_run" ]; then
+			verbose "task: $script, action: $action, ($ID)"
+			dependency_action "$script" "$action"
+		fi
+	fi
+
+	dependency_mark $MARK
+	verbose "task: $script, mark: $MARK, ($ID)"
+}
+
+# Get wait and mark dependencies for task
+#
+# arguments: relation (wait|mark), task, action, script_path
+# result must be assigned to "wait_$task" variable
+#
+# The function can be redefined to extract script dependencies by another
+# ways, i.e. with awk search for keywords in a script headers and so on.
+task_dependencies() {
+	local relation="$1"
+	local task="$2"
+	local action="$3"
+	local path="$4"
+	if [ -x "$path" ]; then
+		task_dependencies_result=$("$path" "$relation" "$action")
+	else
+		task_dependencies_result=
+	fi
+}
+
+verbose() {
+	[ -n "$verbose" ] && info "$*"
+}
+
+info() {
+	echo "$*" >&2
+}
+
+output() {
+	echo "$*"
+}
+
+err_exit() {
+	echo "$1" >&2
+	exit ${2:-1}
+}
+
+usage() {
+	err_exit "Usage: $(basename $0) [-a] [-n] [-v] [-d] action [tasks ...]
+
+Arguments:
+    -a       - add all WAIT-dependent tasks to run list
+    -n       - dry run
+    -v       - verbose
+    -d       - output dependencies for action, can be used for 'tsort'
+               to check for problems
+    action   - start, stop or another action
+    tasks    - task scripts from INIT_DIR;
+               all scripts from INIT_DIR used if tasks are omitted
+
+Environment:
+    INIT_DIR=${INIT_DIR}
+    LOCK_DIR=${LOCK_DIR}"
+}
+
+
+
+: ${INIT_DIR:='/own/etc/init'}
+: ${LOCK_DIR:='/run/init'}
+
+while getopts anvd opt
+do
+	case "$opt" in
+		a) auto_add=1 ;;
+		n) dry_run=1 ;;
+		v) verbose=1 ;;
+		d) dependencies=1 ;;
+		*) usage ;;
+	esac
+done
+
+shift $(($OPTIND - 1))
+
+[ $# -ge 1 ] || usage
+
+action=$1
+shift
+
+[ -d "$INIT_DIR" ] || err_exit "not a directory $INIT_DIR"
+
+# Include .init.sh if present in INIT_DIR. Can be used to redefine dependency_* functions or program flags.
+
+if [ -r "$INIT_DIR/.init.sh" ]; then
+	verbose "include $INIT_DIR/.init.sh"
+	. "$INIT_DIR/.init.sh"
+fi
+
+# If tasks omitted or auto add is on, find all available tasks and add them to allowed tasks
+
+if [ $# -eq 0 -o -n "$auto_add" ]; then
+	allowed_tasks=
+	for script in "$INIT_DIR"/*; do
+		[ -x "$script" ] || continue # Process only executable scripts
+		task=$(basename "$script")
+		allowed_tasks="$allowed_tasks $task"
+	done
+else
+	allowed_tasks="$@"
+fi
+
+# Get WAIT, LEAD and MARK names from allowed tasks
+
+for task in $allowed_tasks; do
+	task_dependencies 'wait' "$task" "$action" "$INIT_DIR/$task"
+	eval wait_$task="\$task_dependencies_result"
+	verbose "dependencies for task $task, wait: $task_dependencies_result"
+
+	task_dependencies 'lead' "$task" "$action" "$INIT_DIR/$task"
+	eval lead_$task="\$task_dependencies_result"
+	verbose "dependencies for task $task, lead: $task_dependencies_result"
+
+	task_dependencies 'mark' "$task" "$action" "$INIT_DIR/$task"
+	eval mark_$task="\$task_dependencies_result"
+	verbose "dependencies for task $task, mark: $task_dependencies_result"
+done
+
+# Prepare virtual tasks
+
+for task in $allowed_tasks; do
+	eval task_marks=\$mark_$task
+	for mark in $task_marks; do
+		[ "$task" = "$mark" ] && continue
+		eval mark_tasks=\$mark_tasks_$mark
+		[ -z "$mark_tasks" ] && marks="$marks $mark"
+		eval mark_tasks_$mark=\"$mark_tasks $task\"
+	done
+done
+
+# Build running tasks list
+
+if [ $# -eq 0 ]; then
+	tasks=$allowed_tasks
+else
+	tasks="$@"
+	if [ -n "$auto_add" ]; then
+		# add dependent tasks
+		verbose "auto add tasks"
+		curr_tasks=$tasks
+		tasks=
+		marks=
+		while [ -n "$curr_tasks" ]; do
+			next_tasks=
+			# check WAIT dependencies and add them to running task list
+			for task in $curr_tasks; do
+				eval checked=\$checked_$task
+				[ -z "$checked" ] || continue
+				eval mark_tasks=\$mark_tasks_$task
+				if [ -z "$mark_tasks" ]; then
+					# real task
+					tasks="$tasks $task"
+					eval next_tasks=\"\$next_tasks \$wait_$task\"
+				else
+					# virtual task (tasks for MARK)
+					marks="$marks $task"
+					next_tasks="$next_tasks $mark_tasks"
+				fi
+				eval checked_$task=1
+			done
+			curr_tasks=$next_tasks
+		done
+	fi
+fi
+
+verbose "tasks: $tasks"
+
+
+# Add leading tasks to wait lists
+
+for task in $tasks; do
+	eval lead=\"\$lead_$task\"
+	for name in $lead; do
+		eval mark_tasks=\$mark_tasks_$name
+		if [ -n "$mark_tasks" ]; then
+			# virtual task (tasks for MARK)
+			for mark_task in  $mark_tasks; do
+				eval wait_$mark_task=\"\$wait_$mark_task $task\"
+			done
+		else
+			# real task
+			eval wait_$name=\"\$wait_$name $task\"
+		fi
+	done
+done
+
+# Dump dependencies for -d option
+
+if [ -n "$dependencies" ]; then
+	# tasks with scripts
+	for task in $tasks; do
+		eval wait=\"\$wait_$task\"
+		for name in $wait; do
+			output "$task $name"
+		done
+	done
+
+	# virtuals tasks, from marks
+	for mark in $marks; do
+		eval wait=\"\$mark_tasks_$mark\"
+		for name in $wait; do
+			output "$mark $name"
+		done
+	done
+	exit 0
+fi
+
+
+# Check, lock and run all tasks
+
+[ -d "$LOCK_DIR" ] && err_exit "$LOCK_DIR already exists"
+
+# atomic mkdir to ensure sole run
+
+mkdir "$LOCK_DIR" 2>&- || err_exit "can't create $LOCK_DIR"
+
+echo $$ > "$LOCK_DIR/init.pid"
+
+dependency_init $tasks $marks
+
+taskpids=
+
+# run tasks with scripts
+for task in $tasks; do
+	(
+		eval WAIT=\"\$wait_$task\"
+		eval MARK=$task
+		dependency_run "$task" "$action"
+	) 9>&- &
+	taskpids="$taskpids $!"
+done
+
+# run virtuals tasks, from marks
+for mark in $marks; do
+	(
+		eval WAIT=\"\$mark_tasks_$mark\"
+		eval MARK=$mark
+		dependency_run
+	) 9>&- &
+	taskpids="$taskpids $!"
+done
+
+cleanup() {
+	trap '' EXIT INT TERM
+
+	# kill all tasks
+	kill -TERM $taskpids 2>&-
+
+	# remove run data
+	rm -f "$LOCK_DIR/init.pid"
+	rmdir "$LOCK_DIR"
+}
+
+trap cleanup EXIT INT TERM
+
+# wait all them complete
+
+verbose "wait"
+wait
+
+verbose "done"
