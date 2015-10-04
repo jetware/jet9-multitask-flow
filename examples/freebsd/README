@@ -2,7 +2,7 @@
 USAGE
 
 	1. Copy jet9-multitask-init to /etc/jet9-multitask-init
-	2. Copy .init.sh to /etc/rc.d/.init.sh
+	2. Copy freebsd-multitask-init.sh to /etc/freebsd-multitask-init.sh
 	3. Apply rc.patch to /etc/rc
 
 	This patch replaces sequential execution of late stage scripts with
@@ -16,13 +16,7 @@ USAGE
 
 NOTE
 
-	The script defines some variables in the shell context and doesn't clean
-	it up before run_rc_script called. It can be fixed later.
+	The script defines many variables in the shell context and it doesn't clean
+	them up before run_rc_script called. This behaviour should be fixed later.
 
 
-KNOWN LIMITATIONS
-
-	Script and dependency names should have only alphanumeric or underscore
-	chars, without hyphen, dot and others.
-
-	Scripts should be placed in single directory (/etc/rc.d)
