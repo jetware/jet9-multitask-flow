@@ -1,0 +1,48 @@
+#!/bin/sh
+
+JET9_MULTITASK_INIT_CLI_DISABLE=1
+
+. ../jet9-multitask-init
+
+LOCK_DIR=/tmp/mti-lock.$$
+
+mkdir $LOCK_DIR
+
+dependency_init apache php_fpm mysql postgresql nginx
+
+# start nginx when all backends are ready
+(
+	dependency_wait apache php_fpm
+	echo start nginx
+	dependency_mark nginx
+) &
+
+# start apache when all databases are ready
+(
+	dependency_wait mysql postgresql
+	echo start apache
+	dependency_mark apache
+) &
+
+# start php_fpm when mysql is ready
+(
+	dependency_wait mysql
+	echo start php_fpm
+	dependency_mark php_fpm
+) &
+
+# start mysql without dependencies
+(
+	echo start mysql
+	dependency_mark mysql
+) &
+
+# start postgresql without dependencies
+(
+	echo start postgresql
+	dependency_mark postgresql
+) &
+
+wait
+
+rmdir $LOCK_DIR

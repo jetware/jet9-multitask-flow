@@ -4,14 +4,9 @@ case "$1" in
 wait)
 	case "$2" in
 		start)
-			echo backend application apache
-			;;
-		stop)
+			echo network
 			;;
 	esac
-	;;
-mark)
-	echo frontend
 	;;
 start)
 	;;
