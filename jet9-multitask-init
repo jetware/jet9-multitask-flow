@@ -92,6 +92,9 @@ task_execute() {
 	local task=$1 action=$2
 	local script
 
+	eval script=\$path_$task
+	output "$script"
+
 	terminated() {
 		info "task $1 terminated"
 		if [ -n "$scriptpid" ]; then
@@ -100,14 +103,11 @@ task_execute() {
 		fi
 	}
 
-	eval script=\$path_$task
-	output "$script"
-
 	# dual trap used to echo output from normal exit context, where stderr is not closed
 	trap "trap 'terminated $script' EXIT; exit" INT TERM
 
 	# run script with action argument, save it's pid to kill it if needed, and wait for complete
-	"$script" $args &
+	"$script" $action &
 	scriptpid=$!
 	wait
 }
@@ -138,6 +138,7 @@ task_dependencies() {
 	eval script=\$path_$task
 	if [ -x $script ]; then
 		dependencies=$($script $relation $action)
+		[ $? -eq 0 ] || return
 		for dependency in $dependencies; do
 			task_internal $dependency
 			task_dependencies_result="$task_dependencies_result $task_internal_result"
@@ -206,7 +207,7 @@ Environment:
 	}
 
 	: ${INIT_DIR:='/own/etc/init'}
-	: ${LOCK_DIR:='/run/init'}
+	: ${LOCK_DIR:='/tmp/init'}
 
 	while getopts anvdi: opt
 	do
@@ -236,17 +237,17 @@ Environment:
 	action=$1
 	shift
 
-	# If INIT_DIR is set, check existence of all directories
-	if [ -n "$INIT_DIR" ]; then
-		for dir in $INIT_DIR; do
-			[ -d $dir ] || err_exit "not a directory $dir"
-		done
-	fi
-
 	# If tasks omitted or auto add is on, find all available scripts and add them to allowed scripts
 
 	scripts=
 	if [ $# -eq 0 -o -n "$auto_add" ]; then
+		# If INIT_DIR is set, check existence of all directories
+		if [ -n "$INIT_DIR" ]; then
+			for dir in $INIT_DIR; do
+				[ -d $dir ] || err_exit "not a directory $dir"
+			done
+		fi
+
 		for dir in $INIT_DIR; do
 			for script in $dir/*; do
 				[ -x "$script" ] || continue # Process only executable scripts
@@ -334,9 +335,16 @@ Environment:
 					[ -z "$checked" ] || continue
 					eval mark_tasks=\$mark_tasks_$task
 					if [ -z "$mark_tasks" ]; then
-						# real task
-						tasks="$tasks $task"
-						eval next_tasks=\"\$next_tasks \$wait_$task\"
+						# no tasks wich define this mark
+						eval script=\$path_$task
+						if [ -n "$script" ]; then
+							# real task
+							tasks="$tasks $task"
+							eval next_tasks=\"\$next_tasks \$wait_$task\"
+						else
+							# unsatisfied dependency, do nothing
+							:
+						fi
 					else
 						# virtual task (tasks for MARK)
 						marks="$marks $task"

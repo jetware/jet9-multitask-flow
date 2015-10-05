@@ -2,7 +2,7 @@
 
 JET9_MULTITASK_INIT_CLI_DISABLE=1
 
-. ../jet9-multitask-init
+. ../../jet9-multitask-init
 
 LOCK_DIR=/tmp/mti-lock.$$
 

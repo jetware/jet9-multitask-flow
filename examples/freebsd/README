@@ -20,3 +20,10 @@ NOTE
 	them up before run_rc_script called. This behaviour should be fixed later.
 
 
+KNOWN BUGS
+
+	Currently task_dependencies() runs awk three times for each script to
+	extract all kinds of dependencies and it spend a lot of time. For 160
+	scripts it took about 0.5 second. It can be rewritten to single awk run
+	for all kinds of dependencies and all scripts to reduce the execution
+	time down to few milliseconds.
