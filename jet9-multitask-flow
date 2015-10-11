@@ -29,52 +29,90 @@
 
 ## Core functions
 #
-#   dependency_init() - prepare FIFO mutexes for all tasks, all mutexes are assumed initially locked
-#   dependency_wait() - wait on the mutexes for the tasks listed
-#   dependency_mark() - mark (broadcast release) the mutexes of the tasks listed
-#   dependency_run()  - run task: wait on WAIT mutexes, run the task, release the MARK mutexes
+#   dependency_init() - inittial lock FIFO mutexes
+#   dependency_wait() - wait on the mutexes
+#   dependency_mark() - mark (broadcast release)
+#   dependency_lock() - wait and lock FIFO mutexes
+#   dependency_run()  - run task:
+#                         wait for all the WAIT mutexes,
+#                         lock all LOCK mutexes
+#                         run the task
+#                         release the LOCK mutexes
+#                         release the MARK mutexes
 
 dependency_init() {
-	local name
+	local name pass=
 	for name in "$@"; do
-		rm -f "$LOCK_DIR/$name"
-		mkfifo "$LOCK_DIR/$name"
+		if ! mkfifo "$LOCK_DIR/$name" 2>&-; then
+			for name in $pass; do
+				rm -f "$LOCK_DIR/$name"
+			done
+			return 1
+		fi
+		pass="$pass $name"
 	done
 }
 
 dependency_wait() {
 	local name none
-	for name in "$@"; do
+	for name in $*; do
 		read none < "$LOCK_DIR/$name"
 	done 2>&-
 }
 
 dependency_mark() {
 	local name
-	for name in "$@"; do
+	for name in $*; do
 		mv "$LOCK_DIR/$name" "$LOCK_DIR/$name.done"
 		: <> "$LOCK_DIR/$name.done" 
 		rm -f "$LOCK_DIR/$name.done"
 	done
 }
 
+dependency_lock() {
+	local pass= name
+	[ $# -gt 0 ] || return
+	while [ -z "$pass" ]; do
+		for name in $*; do
+			# try to lock
+			if mkfifo "$LOCK_DIR/$name" 2>&-; then
+				pass="$pass $name"
+			else
+				# release previous locks, wait current lock and restart
+				dependency_mark $pass
+				dependency_wait $name
+				debug "lock restart on $name"
+				pass=
+				break
+			fi
+		done
+	done
+}
+
+# Arguments: task_and_args wait mark lock
 dependency_run() {
-	local wait="$1" mark="$2" task=$3 action=$4 id
+	local task=${1%% *} args="${1#* }"
+	local wait="$2" mark="${3:-$task}" lock="$4"
+	local id="$wait -> $mark"
 
-	id="$wait -> $mark"
-
-	verbose "task: $task, wait: $wait, ($id)"
+	debug "task: $task, wait: $wait, ($id)"
 	dependency_wait $wait
 
 	if [ -n "$task" ]; then
 		if [ -z "$dry_run" ]; then
-			verbose "task: $task, action: $action, ($id)"
-			task_execute $task $action
+			debug "task: $task, lock: $lock, ($id)"
+			dependency_lock $lock
+			debug "task: $task, execute: $args, ($id)"
+			task_execute $task $args
+			debug "task: $task, mark(lock): $lock, ($id)"
+			dependency_mark $lock
+		else
+			task_simulate $task $args
 		fi
 	fi
 
 	dependency_mark $mark
-	verbose "task: $task, mark: $mark, ($id)"
+	debug "task: $task, mark: $mark, ($id)"
 }
 
 ## Implementation functions
@@ -86,19 +124,30 @@ dependency_run() {
 # Execute script keeping it's pid to kill the script if needed
 # This function can be redefined to execute a task in another mode,
 # i.e. as a shell function, or shell script sourced and executed in subshell,
-# or calling some program and passing task and action to it etc.
+# or calling some program and passing task and args to it etc.
 
-task_execute() {
-	local task=$1 action=$2
+task_simulate() {
+	local task=$1
 	local script
 
+	shift
 	eval script=\$path_$task
-	output "$script"
+	echo "$script $@"
+}
+
+task_execute() {
+	local task=$1
+	local script
+
+	shift
+
+	eval script=\$path_$task
+	info "$script $@"
 
 	terminated() {
-		info "task $1 terminated"
+		notice "task $1 terminated"
 		if [ -n "$scriptpid" ]; then
-			verbose "kill script $1 with pid $scriptpid"
+			debug "kill script $1 with pid $scriptpid"
 			kill $scriptpid
 		fi
 	}
@@ -106,38 +155,40 @@ task_execute() {
 	# dual trap used to echo output from normal exit context, where stderr is not closed
 	trap "trap 'terminated $script' EXIT; exit" INT TERM
 
-	# run script with action argument, save it's pid to kill it if needed, and wait for complete
-	"$script" $action &
+	# run script with args argument, save it's pid to kill it if needed, and wait for complete
+	"$script" "$@" &
 	scriptpid=$!
 	wait
 }
 
-# Get dependencties for all relations of the task and action
+# Get dependencties for all relations of the task and args
 
 task_dependencies_relations() {
-	local task=$1 action=$2 dependency tasks
-	for relation in wait lead mark; do
-		task_dependencies $task $action $relation
-		verbose "dependencies for task $task, $relation: $task_dependencies_result"
+	local task=$1 args="$2" dependency tasks
+	for relation in wait lead lock mark; do
+		task_dependencies $task $relation "$args"
+		debug "dependencies for task $task, $relation: $task_dependencies_result"
 		eval task_dependencies_relations_result_$relation=\"$task_dependencies_result\"
 	done
 }
 
 # Get wait and mark dependencies for task
 #
-# arguments: relation (wait|lead|mark), task, action, script_path
+# arguments: relation (wait|lead|lock|mark), task, args, script_path
 # result must be assigned to "wait_$task" variable
 #
 # The function can be redefined to extract script dependencies by another
 # ways, i.e. with awk search for keywords in a script headers and so on.
-
+# 
+# Arguments: task relation [args ...]
 task_dependencies() {
-	local task=$1 action=$2 relation=$3
+	local task=$1 relation=$2
+	shift 2
 	local script dependency dependencies
 	task_dependencies_result=
 	eval script=\$path_$task
 	if [ -x $script ]; then
-		dependencies=$($script $relation $action)
+		dependencies=$($script $relation "$@")
 		[ $? -eq 0 ] || return
 		for dependency in $dependencies; do
 			task_internal $dependency
@@ -161,26 +212,56 @@ task_internal() {
 	done
 }
 
+
+# Get WAIT, LEAD, LOCK and MARK names for args for tasks
+# Arguments: args scripts_list
+# Install dependencies to the shared variables with relation as prefix and task as suffix
+# Save all tasks as flow_tasks
+flow_load() {
+	local args="$1"
+	shift
+
+	local script name task task_internal_result
+	local task_dependencies_relations_result_wait
+	local task_dependencies_relations_result_lead
+	local task_dependencies_relations_result_mark
+
+	# Build mapping of a task's internal name to the task's script path
+	flow_tasks=
+	for script in $*; do
+		name=${script##*/}
+		task_internal $name
+		eval path_$task_internal_result=$script
+		flow_tasks="$flow_tasks $task_internal_result"
+	done
+
+	# Get WAIT, LEAD, LOCK and MARK names from flow tasks
+	for task in $flow_tasks; do
+		task_dependencies_relations $task "$args"
+
+		eval wait_$task="\$task_dependencies_relations_result_wait"
+		eval lead_$task="\$task_dependencies_relations_result_lead"
+		eval lock_$task="\$task_dependencies_relations_result_lock"
+		eval mark_$task="\$task_dependencies_relations_result_mark"
+	done
+}
+
+
 ## Auxiliary runtime functions
 
-verbose() {
-	[ -n "$verbose" ] && info "$*"
-}
-
-info() {
-	echo "$*" >&2
-}
-
-output() {
-	echo "$*"
-}
+error()  { [ "$verbose" -ge 0 ] && log "$*"; }
+warn()   { [ "$verbose" -ge 1 ] && log "$*"; }
+notice() { [ "$verbose" -ge 2 ] && log "$*"; }
+info()   { [ "$verbose" -ge 3 ] && log "$*"; }
+debug()  { [ "$verbose" -ge 4 ] && log "$*"; }
+log()    { echo "$*" >&2; }
 
 
 ## CLI
 #
 # Parse command line, find scripts, resolve tasks dependencies and run the batch
 
-jet9_multitask_init() {
+jet9_multitask_flow() {
 
 	err_exit() {
 		echo "$1" >&2
@@ -188,34 +269,33 @@ jet9_multitask_init() {
 	}
 
 	usage() {
-		err_exit "Usage: $(basename $0) [-a] [-i include_source] [-n] [-v] [-d] action [tasks ...]
+		err_exit "Usage: $(basename $0) [-a] [-i include_source] [-n] [-q] [-v] [-d] args [tasks ...]
 
 Arguments:
 	-a       - add all WAIT-dependent tasks to run list
 	-i       - include another shell script source
 	-n       - dry run
-	-v       - verbose
-	-d       - output dependencies for action, can be used for 'tsort'
+	-q       - quiet (repeat to decrease output level)
+	-v       - verbose (repeat to increase output level)
+	-d       - list dependencies for args, can be used for 'tsort'
 			   to check for problems
-	action   - start, stop or another action
-	tasks    - task scripts from INIT_DIR;
-			   all scripts from INIT_DIR used if tasks are omitted
+	args     - start, stop or another action
+	tasks    - task scripts from FLOW_DIR;
+			   all scripts from FLOW_DIR used if tasks are omitted
 
 Environment:
-	INIT_DIR=${INIT_DIR}
+	FLOW_DIR=${FLOW_DIR}
 	LOCK_DIR=${LOCK_DIR}"
 	}
 
-	: ${INIT_DIR:='/own/etc/init'}
-	: ${LOCK_DIR:='/tmp/init'}
-
-	while getopts anvdi: opt
+	while getopts anqvdi: opt
 	do
 		case "$opt" in
 			a) auto_add=1 ;;
 			i) include_source="${include_source} $OPTARG" ;;
 			n) dry_run=1 ;;
-			v) verbose=1 ;;
+			q) verbose=$((verbose-1)) ;;
+			v) verbose=$((verbose+1)) ;;
 			d) dependencies=1 ;;
 			*) usage ;;
 		esac
@@ -226,34 +306,34 @@ Environment:
 	# Include another source. Can be used to redefine dependency_* functions or program flags.
 
 	for source in $include_source; do
-		verbose "include $source"
+		debug "include $source"
 		. $source
 	done
 
-	# Get action and tasks
+	# Get args and tasks
 
 	[ $# -ge 1 ] || usage
 
-	action=$1
+	args="$1"
 	shift
 
-	# If tasks omitted or auto add is on, find all available scripts and add them to allowed scripts
+	# If tasks omitted or auto add is on, find all available scripts and add them to flow scripts
 
 	scripts=
 	if [ $# -eq 0 -o -n "$auto_add" ]; then
-		# If INIT_DIR is set, check existence of all directories
-		if [ -n "$INIT_DIR" ]; then
-			for dir in $INIT_DIR; do
+		# If FLOW_DIR is set, check existence of all directories
+		if [ -n "$FLOW_DIR" ]; then
+			for dir in $FLOW_DIR; do
 				[ -d $dir ] || err_exit "not a directory $dir"
 			done
-		fi
 
-		for dir in $INIT_DIR; do
-			for script in $dir/*; do
-				[ -x "$script" ] || continue # Process only executable scripts
-				scripts="$scripts $script"
+			for dir in $FLOW_DIR; do
+				for script in $dir/*; do
+					[ -x "$script" ] || continue # Process only executable scripts
+					scripts="$scripts $script"
+				done
 			done
-		done
+		fi
 	else
 		for script in "$@"; do
 			case $script in
@@ -262,7 +342,7 @@ Environment:
 				scripts="$scripts $script"
 				;;
 			*)
-				for dir in $INIT_DIR; do
+				for dir in $FLOW_DIR; do
 					path=$dir/$script
 					[ -x "$path" ] && break
 					path=
@@ -275,30 +355,12 @@ Environment:
 	fi
 
 
-	# Build mapping of a task's internal name to the task's script path
-
-	allowed_tasks=
-	for script in $scripts; do
-		name=${script##*/}
-		task_internal $name
-		eval path_$task_internal_result=$script
-		allowed_tasks="$allowed_tasks $task_internal_result"
-	done
-
-
-	# Get WAIT, LEAD and MARK names from allowed tasks
-
-	for task in $allowed_tasks; do
-		task_dependencies_relations $task $action
-
-		eval wait_$task="\$task_dependencies_relations_result_wait"
-		eval lead_$task="\$task_dependencies_relations_result_lead"
-		eval mark_$task="\$task_dependencies_relations_result_mark"
-	done
+	# Load dependencies and tasks flow
+	flow_load "$args" $scripts
 
 	# Prepare virtual tasks (defined only by marks and without corresponding script)
 
-	for task in $allowed_tasks; do
+	for task in $flow_tasks; do
 		eval task_marks=\$mark_$task
 		for mark in $task_marks; do
 			[ "$task" = "$mark" ] && continue
@@ -311,19 +373,19 @@ Environment:
 	# Build running tasks list
 
 	if [ $# -eq 0 ]; then
-		# no task in argument, use all allowed tasks from all dirs in INIT_DIR
-		tasks=$allowed_tasks
+		# no task in argument, use all flow tasks from all dirs in FLOW_DIR
+		tasks=$flow_tasks
 	else
 		# use tasks from arguments
 		tasks=
-		for script in "$@"; do
+		for script in $*; do
 			name=${script##*/}
 			task_internal $name
 			tasks="$tasks $task_internal_result"
 		done
 		if [ -n "$auto_add" ]; then
 			# add dependent tasks
-			verbose "auto add tasks"
+			debug "auto add tasks"
 			curr_tasks=$tasks
 			tasks=
 			marks=
@@ -343,7 +405,7 @@ Environment:
 							eval next_tasks=\"\$next_tasks \$wait_$task\"
 						else
 							# unsatisfied dependency, do nothing
-							:
+							debug "unsatisfied dependency $task"
 						fi
 					else
 						# virtual task (tasks for MARK)
@@ -357,7 +419,7 @@ Environment:
 		fi
 	fi
 
-	verbose "tasks: $tasks"
+	debug "tasks: $tasks"
 
 
 	# Add leading tasks to wait lists
@@ -385,7 +447,7 @@ Environment:
 		for task in $tasks; do
 			eval wait=\"\$wait_$task\"
 			for name in $wait; do
-				output "$task $name"
+				echo "$task $name"
 			done
 		done
 
@@ -393,7 +455,7 @@ Environment:
 		for mark in $marks; do
 			eval wait=\"\$mark_tasks_$mark\"
 			for name in $wait; do
-				output "$mark $name"
+				echo "$mark $name"
 			done
 		done
 		exit 0
@@ -408,9 +470,9 @@ Environment:
 
 	mkdir "$LOCK_DIR" 2>&- || err_exit "can't create $LOCK_DIR"
 
-	echo $$ > "$LOCK_DIR/init.pid"
+	echo $$ > "$LOCK_DIR/flow.pid"
 
-	dependency_init $tasks $marks
+	dependency_init $tasks $marks || err_exit "can't aquire initial locks"
 
 	taskpids=
 
@@ -418,7 +480,8 @@ Environment:
 	for task in $tasks; do
 		(
 			eval wait=\"\$wait_$task\"
-			dependency_run "$wait" "$task" "$task" "$action"
+			eval lock=\"\$lock_$task\"
+			dependency_run "$task $args" "$wait" "$task" "$lock" 
 		) &
 		taskpids="$taskpids $!"
 	done
@@ -427,7 +490,7 @@ Environment:
 	for mark in $marks; do
 		(
 			eval wait=\"\$mark_tasks_$mark\"
-			dependency_run "$wait" "$mark"
+			dependency_run '' "$wait" "$mark"
 		) &
 		taskpids="$taskpids $!"
 	done
@@ -439,7 +502,7 @@ Environment:
 		kill -TERM $taskpids 2>&-
 
 		# remove run data
-		rm -f "$LOCK_DIR/init.pid"
+		rm -f "$LOCK_DIR/flow.pid"
 		rmdir "$LOCK_DIR"
 	}
 
@@ -447,18 +510,22 @@ Environment:
 
 	# wait all them complete
 
-	verbose "wait"
+	debug "wait"
 	wait
 
-	verbose "done"
+	debug "done"
 }
 
-# Check JET9_MULTITASK_INIT_CLI_DISABLE and run command if not
-# To use jet9_multitask_init only as library, set JET9_MULTITASK_INIT_CLI_DISABLE
+# Check JET9_MULTITASK_FLOW_CLI_DISABLE and run command if not
+# To use jet9_multitask_flow only as library, set JET9_MULTITASK_FLOW_CLI_DISABLE
 # before loading via . source
 
-if [ -z "$JET9_MULTITASK_INIT_CLI_DISABLE" ]; then
-	jet9_multitask_init "$@"
+: ${FLOW_DIR:='/own/etc/init'}
+: ${LOCK_DIR:='/tmp/init'}
+verbose=2 # default level: NOTICE
+
+if [ -n "$JET9_MULTITASK_FLOW_CLI_DISABLE" ]; then
+	unset JET9_MULTITASK_FLOW_CLI_DISABLE
 else
-	unset JET9_MULTITASK_INIT_CLI_DISABLE
+	jet9_multitask_flow "$@"
 fi

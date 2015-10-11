@@ -1,8 +1,8 @@
 #!/bin/sh
 
-JET9_MULTITASK_INIT_CLI_DISABLE=1
+JET9_MULTITASK_FLOW_CLI_DISABLE=1
 
-. ../../jet9-multitask-init
+. ../../jet9-multitask-flow
 
 LOCK_DIR=/tmp/mti-lock.$$
 
@@ -13,19 +13,19 @@ task_execute() {
 	echo "execute $1 $2"
 }
 
-dependency_init apache mysql postgresql nginx
+dependency_init network iscsi_login nfs_mount virtual_machines
 
-# start nginx when all backends are ready
-dependency_run "apache" "nginx" "nginx" &
+# start virtual machines when iscsi disks and NFS mounts are ready
+dependency_run 'virtual_machines start' 'iscsi_login nfs_mount' &
 
-# start apache when all databases are ready
-dependency_run "mysql postgresql" "apache" "apache" &
+# start nfs mounts when network is ready
+dependency_run 'nfs_mount start' 'network' &
 
-# start mysql without dependencies
-dependency_run "" "mysql" "mysql" &
+# start ISCSI when network is ready
+dependency_run 'iscsi_login start' 'network' &
 
-# start postgresql without dependencies
-dependency_run "" "postgresql" "postgresql" &
+# start network without dependencies
+dependency_run 'network start' &
 
 wait
 

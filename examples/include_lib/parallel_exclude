@@ -1,0 +1,30 @@
+#!/bin/sh
+
+JET9_MULTITASK_FLOW_CLI_DISABLE=1
+
+. ../../jet9-multitask-flow
+
+LOCK_DIR=/tmp/mti-lock.$$
+
+mkdir $LOCK_DIR
+
+# arguments: task action
+task_execute() {
+	echo "enter $1"
+	sleep 0.01
+	echo "leave $1"
+}
+
+dependency_init poll_sensor0 poll_sensor1 report_sensor0 report_sensor1 
+
+# report sensors' state with exclusive lock 'use_modem' to prevent simultaneous modem access
+dependency_run report_sensor0 poll_sensor0 '' use_modem &
+dependency_run report_sensor1 poll_sensor1 '' use_modem &
+
+# poll sensors without dependencies
+dependency_run poll_sensor0 &
+dependency_run poll_sensor1 &
+
+wait
+
+rmdir $LOCK_DIR

@@ -1,8 +1,8 @@
 # Get dependencies for rcorder-compatible scripts
 
 task_dependencies() {
-	local task=$1 action=$2 relation=$3
-	local script dependency dependencies
+	local task=$1 relation=$2 action=$3
+	local script section dependency dependencies
 	task_dependencies_result=
 	eval script=\$path_$task
 

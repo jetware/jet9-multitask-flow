@@ -1,15 +1,17 @@
 
 USAGE
 
-	1. Copy jet9-multitask-init to /etc/jet9-multitask-init
-	2. Copy freebsd-multitask-init.sh to /etc/freebsd-multitask-init.sh
-	3. Apply rc.patch to /etc/rc
+	1. Copy jet9-multitask-flow to /etc/jet9-multitask-flow
+	2. Copy freebsd-multitask-flow.sh to /etc/freebsd-multitask-flow.sh
+	3. Apply rc.patch to /etc/rc and rc.conf.patch to /etc/defaults/rc.conf
 
-	This patch replaces sequential execution of late stage scripts with
-	parallel one. The `rcorder` is used only to select scripts by keywords,
-	but the real order jet9-multitask-init determines itself from scripts'
-	annotations with task_dependencies() function. The execution is done in
-	topologically order (strict partial order) defined by dependencies.
+	This patch adds parallel execution of late stage scripts. Sequential or
+	parallel mode can be configured by rc.conf variable `rc_parallel`.
+
+	The `rcorder` is used only to select scripts by keywords, but the real
+	order jet9-multitask-flow determines itself from scripts' annotations with
+	task_dependencies() function. The execution is done in topologically order
+	(strict partial order) defined by dependencies.
 
 	It supports REQUIRE, BEFORE and PROVIDE annotations.
 

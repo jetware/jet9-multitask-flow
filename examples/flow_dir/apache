@@ -14,7 +14,13 @@ wait)
 mark)
 	echo backend
 	;;
+lock)
+	echo application_exclusive
+	;;
 start)
+	echo -n 'apache start enter ...'
+	sleep 0.01
+	echo '... apache start leave'
 	;;
 stop)
 	;;

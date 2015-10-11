@@ -1,8 +1,8 @@
 #!/bin/sh
 
-JET9_MULTITASK_INIT_CLI_DISABLE=1
+JET9_MULTITASK_FLOW_CLI_DISABLE=1
 
-. ../../jet9-multitask-init
+. ../../jet9-multitask-flow
 
 LOCK_DIR=/tmp/mti-lock.$$
 
@@ -11,58 +11,58 @@ mkdir $LOCK_DIR
 dependency_init apache unicorn mysql postgresql nginx database frontend backend
 
 task_execute() {
-	eval run_$1 $2
+	eval run_$1
 }
 
 run_nginx() {
-	echo "run nginx"
+	echo run nginx
 }
 
 run_apache() {
-	echo "run apache"
+	echo run apache
 }
 
 run_unicorn() {
-	echo "run unicorn"
+	echo run unicorn
 }
 
 run_mysql() {
-	echo "run mysql"
+	echo run mysql
 }
 
 run_postgresql() {
-	echo "run postgresql"
+	echo run postgresql
 }
 
 
 ## define virtual tasks
 
 # wait apache and unicorn, than mark backend
-dependency_run "apache unicorn" "backend" &
+dependency_run '' 'apache unicorn' 'backend' &
 
 # wait mysql and postgresql, than mark database
-dependency_run "mysql postgresql" "database" &
+dependency_run '' 'mysql postgresql' 'database' &
 
 # wait nginx, than mark frontend
-dependency_run "nginx" "frontend" &
+dependency_run '' 'nginx' 'frontend' &
 
 
 ## define real tasks
 
-# start nginx when all backends are ready
-dependency_run "backend" "nginx" "nginx" &
+# run nginx when all backends are ready
+dependency_run 'nginx' 'backend' &
 
-# start apache when all databases are ready
-dependency_run "database" "apache" "apache" &
+# run apache when all databases are ready
+dependency_run 'apache' 'database' &
 
-# start unicorn when mysql is ready 
-dependency_run "mysql" "unicorn" "unicorn" &
+# run unicorn when mysql is ready 
+dependency_run 'unicorn' 'mysql' &
 
-# start mysql without dependencies
-dependency_run "" "mysql" "mysql" &
+# run mysql without dependencies
+dependency_run 'mysql' &
 
-# start postgresql without dependencies
-dependency_run "" "postgresql" "postgresql" &
+# run postgresql without dependencies
+dependency_run 'postgresql' &
 
 wait
 

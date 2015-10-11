@@ -14,7 +14,13 @@ wait)
 mark)
 	echo application
 	;;
+lock)
+	echo application_exclusive
+	;;
 start)
+	echo -n 'php-fpm start enter ...'
+	sleep 0.01
+	echo '... php-fpm start leave'
 	;;
 stop)
 	;;

@@ -1,8 +1,8 @@
 #!/bin/sh
 
-JET9_MULTITASK_INIT_CLI_DISABLE=1
+JET9_MULTITASK_FLOW_CLI_DISABLE=1
 
-. ../../jet9-multitask-init
+. ../../jet9-multitask-flow
 
 LOCK_DIR=/tmp/mti-lock.$$
 
