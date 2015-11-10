@@ -11,6 +11,13 @@ wait)
 			;;
 	esac
 	;;
+auto)
+	case "$2" in
+		start)
+			echo database
+			;;
+	esac
+	;;
 mark)
 	echo backend
 	;;

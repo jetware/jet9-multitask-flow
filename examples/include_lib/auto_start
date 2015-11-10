@@ -1,0 +1,7 @@
+#!/bin/sh
+
+export FLOW_DIR=../flow_dir
+export LOCK_DIR=/tmp/mti-lock.$$
+
+../../jet9-multitask-flow -v -a start nginx
+

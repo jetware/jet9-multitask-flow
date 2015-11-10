@@ -14,7 +14,7 @@ Read the source code (jet9-multitask-flow) for comments and examples/*.
     Usage: jet9-multitask-flow [-a] [-i include_source] [-n] [-v] [-d] action [tasks ...]
 
     Arguments:
-            -a       - add all WAIT-dependent tasks to run list
+            -a       - add all AUTO-dependent tasks to run list
             -i       - include another shell script source
             -n       - dry run
             -v       - verbose
@@ -55,6 +55,8 @@ Read the source code (jet9-multitask-flow) for comments and examples/*.
 ##### Автоматическое добавление зависимых задач
 
 При выполнении перечисленных в аргументах задач можно с помощью ключа `-a` автоматически выполнять другие задачи (и реальные скрипты, и зависимости MARK), от которых зависят задачи в аргументах. Например, если указать `start apache` с ключем `-a`, то будет также выполнена зависимость `database`, которая в свою очередь потребует выполнение `mysql` и `postgresql`. С помощью ключа `-a` можно также указывать команду для виртуальных MARK-задач, например, `-a start database`.
+
+Для автоматического добавления задач используется отношение AUTO. То есть для того, чтобы привязать автоматический запуск database к `apache`, нужно при запросе отношения `auto` для действия `start` сообщить `database`.
 
 #### Прерывание процесса
 

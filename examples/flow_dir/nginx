@@ -10,6 +10,13 @@ wait)
 			;;
 	esac
 	;;
+auto)
+	case "$2" in
+		start)
+			echo backend application
+			;;
+	esac
+	;;
 mark)
 	echo frontend
 	;;

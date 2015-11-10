@@ -165,7 +165,7 @@ task_execute() {
 
 task_dependencies_relations() {
 	local task=$1 args="$2" dependency tasks
-	for relation in wait lead lock mark; do
+	for relation in wait lead lock mark auto; do
 		task_dependencies $task $relation "$args"
 		debug "dependencies for task $task, $relation: $task_dependencies_result"
 		eval task_dependencies_relations_result_$relation=\"$task_dependencies_result\"
@@ -174,7 +174,7 @@ task_dependencies_relations() {
 
 # Get wait and mark dependencies for task
 #
-# arguments: relation (wait|lead|lock|mark), task, args, script_path
+# arguments: relation (wait|lead|lock|mark|auto), task, args, script_path
 # result must be assigned to "wait_$task" variable
 #
 # The function can be redefined to extract script dependencies by another
@@ -213,7 +213,7 @@ task_internal() {
 }
 
 
-# Get WAIT, LEAD, LOCK and MARK names for args for tasks
+# Get WAIT, LEAD, LOCK, MARK and AUTO names for args for tasks
 # Arguments: args scripts_list
 # Install dependencies to the shared variables with relation as prefix and task as suffix
 # Save all tasks as flow_tasks
@@ -225,6 +225,7 @@ flow_load() {
 	local task_dependencies_relations_result_wait
 	local task_dependencies_relations_result_lead
 	local task_dependencies_relations_result_mark
+	local task_dependencies_relations_result_auto
 
 	# Build mapping of a task's internal name to the task's script path
 	flow_tasks=
@@ -235,7 +236,7 @@ flow_load() {
 		flow_tasks="$flow_tasks $task_internal_result"
 	done
 
-	# Get WAIT, LEAD, LOCK and MARK names from flow tasks
+	# Get WAIT, LEAD, LOCK, MARK and AUTO names from flow tasks
 	for task in $flow_tasks; do
 		task_dependencies_relations $task "$args"
 
@@ -243,6 +244,7 @@ flow_load() {
 		eval lead_$task="\$task_dependencies_relations_result_lead"
 		eval lock_$task="\$task_dependencies_relations_result_lock"
 		eval mark_$task="\$task_dependencies_relations_result_mark"
+		eval auto_$task="\$task_dependencies_relations_result_auto"
 	done
 }
 
@@ -272,7 +274,7 @@ jet9_multitask_flow() {
 		err_exit "Usage: $(basename $0) [-a] [-i include_source] [-n] [-q] [-v] [-d] args [tasks ...]
 
 Arguments:
-	-a       - add all WAIT-dependent tasks to run list
+	-a       - add all AUTO-dependent tasks to run list
 	-i       - include another shell script source
 	-n       - dry run
 	-q       - quiet (repeat to decrease output level)
@@ -391,7 +393,7 @@ Environment:
 			marks=
 			while [ -n "$curr_tasks" ]; do
 				next_tasks=
-				# check WAIT dependencies and add them to running task list
+				# check AUTO dependencies and add them to running task list
 				for task in $curr_tasks; do
 					eval checked=\$checked_$task
 					[ -z "$checked" ] || continue
@@ -402,7 +404,7 @@ Environment:
 						if [ -n "$script" ]; then
 							# real task
 							tasks="$tasks $task"
-							eval next_tasks=\"\$next_tasks \$wait_$task\"
+							eval next_tasks=\"\$next_tasks \$auto_$task\"
 						else
 							# unsatisfied dependency, do nothing
 							debug "unsatisfied dependency $task"
