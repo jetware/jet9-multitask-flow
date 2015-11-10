@@ -251,11 +251,11 @@ flow_load() {
 
 ## Auxiliary runtime functions
 
-error()  { [ "$verbose" -ge 0 ] && log "$*"; }
-warn()   { [ "$verbose" -ge 1 ] && log "$*"; }
-notice() { [ "$verbose" -ge 2 ] && log "$*"; }
-info()   { [ "$verbose" -ge 3 ] && log "$*"; }
-debug()  { [ "$verbose" -ge 4 ] && log "$*"; }
+error()  { if [ "$verbose" -ge 0 ]; then log "$*"; fi }
+warn()   { if [ "$verbose" -ge 1 ]; then log "$*"; fi }
+notice() { if [ "$verbose" -ge 2 ]; then log "$*"; fi }
+info()   { if [ "$verbose" -ge 3 ]; then log "$*"; fi }
+debug()  { if [ "$verbose" -ge 4 ]; then log "$*"; fi }
 log()    { echo "$*" >&2; }
 
 
