@@ -148,7 +148,7 @@ task_execute() {
 		notice "task $1 terminated"
 		if [ -n "$scriptpid" ]; then
 			debug "kill script $1 with pid $scriptpid"
-			kill $scriptpid
+			kill -TERM $scriptpid
 		fi
 	}
 
@@ -498,17 +498,24 @@ Environment:
 	done
 
 	cleanup() {
-		trap '' EXIT INT TERM
-
-		# kill all tasks
-		kill -TERM $taskpids 2>&-
+		trap '' EXIT
 
 		# remove run data
 		rm -f "$LOCK_DIR/flow.pid"
 		rmdir "$LOCK_DIR"
 	}
 
-	trap cleanup EXIT INT TERM
+	terminate() {
+		trap '' INT TERM
+
+		# kill all tasks
+		kill -TERM $taskpids 2>&-
+		rm -f $LOCK_DIR/*
+		exit 2
+	}
+
+	trap cleanup EXIT
+	trap terminate INT TERM
 
 	# wait all them complete
 
