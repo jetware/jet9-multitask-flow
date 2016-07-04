@@ -188,7 +188,7 @@ task_dependencies() {
 	task_dependencies_result=
 	eval script=\$path_$task
 	if [ -x $script ]; then
-		dependencies=$($script $relation "$@")
+		dependencies=$($script $relation "$@" 2>/dev/null)
 		[ $? -eq 0 ] || return
 		for dependency in $dependencies; do
 			task_internal $dependency
