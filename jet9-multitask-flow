@@ -43,7 +43,7 @@
 dependency_init() {
 	local name pass=
 	for name in "$@"; do
-		if ! mkfifo "$LOCK_DIR/$name" 2>&-; then
+		if ! mkfifo "$LOCK_DIR/$name" 2>/dev/null; then
 			for name in $pass; do
 				rm -f "$LOCK_DIR/$name"
 			done
@@ -57,7 +57,7 @@ dependency_wait() {
 	local name none
 	for name in $*; do
 		read none < "$LOCK_DIR/$name"
-	done 2>&-
+	done 2>/dev/null
 }
 
 dependency_mark() {
@@ -75,7 +75,7 @@ dependency_lock() {
 	while [ -z "$pass" ]; do
 		for name in $*; do
 			# try to lock
-			if mkfifo "$LOCK_DIR/$name" 2>&-; then
+			if mkfifo "$LOCK_DIR/$name" 2>/dev/null; then
 				pass="$pass $name"
 			else
 				# release previous locks, wait current lock and restart
@@ -470,7 +470,7 @@ Environment:
 
 	# atomic mkdir to ensure sole run
 
-	mkdir "$LOCK_DIR" 2>&- || err_exit "can't create $LOCK_DIR"
+	mkdir "$LOCK_DIR" 2>/dev/null || err_exit "can't create $LOCK_DIR"
 
 	echo $$ > "$LOCK_DIR/flow.pid"
 
@@ -509,7 +509,7 @@ Environment:
 		trap '' INT TERM
 
 		# kill all tasks
-		kill -TERM $taskpids 2>&-
+		kill -TERM $taskpids 2>/dev/null
 		rm -f $LOCK_DIR/*
 		exit 2
 	}
