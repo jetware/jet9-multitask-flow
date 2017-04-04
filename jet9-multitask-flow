@@ -258,11 +258,11 @@ flow_load() {
 
 ## Auxiliary runtime functions
 
-error()  { if [ "$verbose" -ge 0 ]; then log "$*"; fi }
-warn()   { if [ "$verbose" -ge 1 ]; then log "$*"; fi }
-notice() { if [ "$verbose" -ge 2 ]; then log "$*"; fi }
-info()   { if [ "$verbose" -ge 3 ]; then log "$*"; fi }
-debug()  { if [ "$verbose" -ge 4 ]; then log "$*"; fi }
+error()  { if [ "$VERBOSE" -ge 0 ]; then log "$*"; fi }
+warn()   { if [ "$VERBOSE" -ge 1 ]; then log "$*"; fi }
+notice() { if [ "$VERBOSE" -ge 2 ]; then log "$*"; fi }
+info()   { if [ "$VERBOSE" -ge 3 ]; then log "$*"; fi }
+debug()  { if [ "$VERBOSE" -ge 4 ]; then log "$*"; fi }
 log()    { echo "$*" >&2; }
 
 
@@ -273,7 +273,7 @@ log()    { echo "$*" >&2; }
 jet9_multitask_flow() {
 
 	err_exit() {
-		echo "$1" >&2
+		log "$1"
 		exit ${2:-1}
 	}
 
@@ -303,8 +303,8 @@ Environment:
 			a) auto_add=1 ;;
 			i) include_source="${include_source} $OPTARG" ;;
 			n) dry_run=1 ;;
-			q) verbose=$((verbose-1)) ;;
-			v) verbose=$((verbose+1)) ;;
+			q) VERBOSE=$((VERBOSE-1)) ;;
+			v) VERBOSE=$((VERBOSE+1)) ;;
 			d) dependencies=1 ;;
 			*) usage ;;
 		esac
@@ -492,7 +492,9 @@ Environment:
 			eval lock=\"\$lock_$task\"
 			dependency_run "$task $args" "$wait" "$task" "$lock" 
 		) &
-		taskpids="$taskpids $!"
+		child=$!
+		debug "async dependency_run '$task $args' '$wait' '$task' '$lock', pid: $child"
+		taskpids="$taskpids $child"
 	done
 
 	# run virtuals tasks, from marks
@@ -501,7 +503,9 @@ Environment:
 			eval wait=\"\$mark_tasks_$mark\"
 			dependency_run '' "$wait" "$mark"
 		) &
-		taskpids="$taskpids $!"
+		child=$!
+		debug "async dependency_run '' '$wait' '$mark', pid: $child"
+		taskpids="$taskpids $child"
 	done
 
 	cleanup() {
@@ -538,7 +542,7 @@ Environment:
 
 : ${FLOW_DIR:='/own/etc/init'}
 : ${LOCK_DIR:='/tmp/init'}
-verbose=2 # default level: NOTICE
+: ${VERBOSE:=2} # default level: NOTICE
 
 if [ -n "$JET9_MULTITASK_FLOW_CLI_DISABLE" ]; then
 	unset JET9_MULTITASK_FLOW_CLI_DISABLE
