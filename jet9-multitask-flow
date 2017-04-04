@@ -29,7 +29,7 @@
 
 ## Core functions
 #
-#   dependency_init() - inittial lock FIFO mutexes
+#   dependency_init() - initial lock FIFO mutexes
 #   dependency_wait() - wait on the mutexes
 #   dependency_mark() - mark (broadcast release)
 #   dependency_lock() - wait and lock FIFO mutexes
@@ -266,6 +266,120 @@ debug()  { if [ "$VERBOSE" -ge 4 ]; then log "$*"; fi }
 log()    { echo "$*" >&2; }
 
 
+## Flow locking  functions
+#
+# Use flock(1) if available and enabled by FLOCK env,
+# otherwise plain file locking.
+
+: ${FLOCK=yes}
+if [ -n "$FLOCK" ] && type flock >/dev/null 2>&1; then
+	# Install flock-based locking
+
+	lock_create() {
+		mkdir -p "$LOCK_DIR.$$"
+		echo $$ > "$LOCK_DIR.$$/flow.pid"
+		exec 9< "$LOCK_DIR.$$"
+		flock 9 
+
+		mv --no-target-directory "$LOCK_DIR.$$" "$LOCK_DIR" 2>/dev/null &&
+			return 0
+
+		exec 9<&-
+		rm -rf "$LOCK_DIR.$$"
+		return 1
+	}
+
+	lock_wait() {
+		flock 9 9< "$LOCK_DIR"
+	}
+
+	lock_cleanup() {
+		exec 9< "$LOCK_DIR" || return 0
+
+		# Если нельзя заблокировать каталог лока, то это актуальный лок,
+		# поэтому возвращаем ошибку
+		if ! flock -n 9; then
+			exec 9<&-
+			return 1
+		fi
+
+		# Если удалось заблокировать каталог лока, значит он брошен
+		# и мы присвоили его себе, как обычный лок. Поэтому освобождаем
+		# его тоже как обычный лок.
+		lock_remove
+		return 0
+	}
+
+	lock_remove() {
+		mv "$LOCK_DIR" "$LOCK_DIR.$$.delete" && rm -rf "$LOCK_DIR.$$.delete"
+		exec 9<&-
+	}
+else
+	# Install plain file locking
+
+	lock_create() {
+		mkdir -p "$LOCK_DIR.$$"
+		echo $$ > "$LOCK_DIR.$$/flow.pid"
+
+		mv --no-target-directory "$LOCK_DIR.$$" "$LOCK_DIR" 2>/dev/null &&
+			return 0
+
+		rm -rf "$LOCK_DIR.$$"
+		return 1
+	}
+
+	lock_check() {
+		local pid
+		[ -e "$LOCK_DIR/flow.pid" ] && read pid < "$LOCK_DIR/flow.pid" && kill -0 $pid
+	}
+
+	lock_wait() {
+		local pid=
+		while true; do
+			lock_check || return
+			sleep 1
+		done
+	}
+
+	lock_cleanup() {
+		lock_check && return 1
+		lock_remove
+		return 0
+	}
+
+	lock_remove() {
+		mv "$LOCK_DIR" "$LOCK_DIR.$$.delete" && rm -rf "$LOCK_DIR.$$.delete"
+	}
+fi
+
+lock_ensure() {
+	while true; do
+		# Пробуем получить лок на месте пустого каталога
+		if lock_create; then
+			return 0
+		else
+			# Если лок не удалось получить, значит есть какой-то каталог.
+			# Его нужно проверить на актуальность и удалить, если он старый.
+			# Если устарел, то lock_cleanup очищает каталог и возвращает true,
+			# после чего мы снова пытаемся получить лок с исходного состояния.
+			lock_cleanup && continue
+
+			# Если есть флаг принудительной остановки уже работающего потока,
+			# то останавливаем его и включаем режим ожидания.
+			if [ -n "$force_kill" ]; then
+				read pid < "$LOCK_DIR/flow.pid" && kill $pid
+				try_or_fail=
+			fi
+
+			# Если указана остановка без ожидания, значит возвращаем ошибку
+			[ -n "$try_or_fail" ] && return 1
+
+			# Ждем завершения другого потока и пробуем получить лок снова
+			lock_wait
+		fi
+	done
+}
+
 ## CLI
 #
 # Parse command line, find scripts, resolve tasks dependencies and run the batch
@@ -278,14 +392,16 @@ jet9_multitask_flow() {
 	}
 
 	usage() {
-		err_exit "Usage: $(basename $0) [-a] [-i include_source] [-n] [-q] [-v] [-d] args [tasks ...]
+		err_exit "Usage: $(basename $0) [-a] [-f] [-i include_source] [-n] [-q] [-v] [-t] [-d] args [tasks ...]
 
 Arguments:
 	-a       - add all AUTO-dependent tasks to run list
+	-f       - forced run, kill another flow process if exists
 	-i       - include another shell script source
 	-n       - dry run
 	-q       - quiet (repeat to decrease output level)
 	-v       - verbose (repeat to increase output level)
+	-t       - stop if another flow process if exists (otherwise wait till another process exits)
 	-d       - list dependencies for args, can be used for 'tsort'
 			   to check for problems
 	args     - start, stop or another action
@@ -297,14 +413,16 @@ Environment:
 	LOCK_DIR=${LOCK_DIR}"
 	}
 
-	while getopts anqvdi: opt
+	while getopts afnqvtdi: opt
 	do
 		case "$opt" in
 			a) auto_add=1 ;;
+			f) force_kill=1 ;;
 			i) include_source="${include_source} $OPTARG" ;;
 			n) dry_run=1 ;;
 			q) VERBOSE=$((VERBOSE-1)) ;;
 			v) VERBOSE=$((VERBOSE+1)) ;;
+			t) try_or_fail=1 ;;
 			d) dependencies=1 ;;
 			*) usage ;;
 		esac
@@ -471,19 +589,16 @@ Environment:
 	fi
 
 
-	# Check, lock and run all tasks
+	# Create run directory, lock and prepare flows
 
-	[ -d "$LOCK_DIR" ] && err_exit "$LOCK_DIR already exists"
+	lock_ensure || err_exit "another flow in $LOCK_DIR running"
 
-	# atomic mkdir to ensure sole run
-
-	mkdir "$LOCK_DIR" 2>/dev/null || err_exit "can't create $LOCK_DIR"
-
-	echo $$ > "$LOCK_DIR/flow.pid"
-
-	dependency_init $tasks $marks || err_exit "can't aquire initial locks"
+	dependency_init $tasks $marks || err_exit "can't acquire initial locks"
 
 	taskpids=
+
+	# close FD 9 when running async tasks to detach them from the lock
+	# made my flock(1)
 
 	# run tasks with scripts
 	for task in $tasks; do
@@ -491,7 +606,7 @@ Environment:
 			eval wait=\"\$wait_$task\"
 			eval lock=\"\$lock_$task\"
 			dependency_run "$task $args" "$wait" "$task" "$lock" 
-		) &
+		) 9<&- &
 		child=$!
 		debug "async dependency_run '$task $args' '$wait' '$task' '$lock', pid: $child"
 		taskpids="$taskpids $child"
@@ -502,7 +617,7 @@ Environment:
 		(
 			eval wait=\"\$mark_tasks_$mark\"
 			dependency_run '' "$wait" "$mark"
-		) &
+		) 9<&- &
 		child=$!
 		debug "async dependency_run '' '$wait' '$mark', pid: $child"
 		taskpids="$taskpids $child"
@@ -511,9 +626,7 @@ Environment:
 	cleanup() {
 		trap '' EXIT
 
-		# remove run data
-		rm -f "$LOCK_DIR/flow.pid"
-		rmdir "$LOCK_DIR"
+		lock_remove
 	}
 
 	terminate() {
