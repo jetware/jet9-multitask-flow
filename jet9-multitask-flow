@@ -145,20 +145,27 @@ task_execute() {
 	info "$script $@"
 
 	terminated() {
+		local _err=$?
+		trap '' INT TERM
 		notice "task $1 terminated"
 		if [ -n "$scriptpid" ]; then
-			debug "kill script $1 with pid $scriptpid"
-			kill -TERM $scriptpid
+			debug "kill script $script, pid $scriptpid"
+			kill $scriptpid 2>/dev/null
 		fi
+		exit $_err
 	}
 
 	# dual trap used to echo output from normal exit context, where stderr is not closed
-	trap "trap 'terminated $script' EXIT; exit" INT TERM
+	trap terminated INT TERM
 
 	# run script with args argument, save it's pid to kill it if needed, and wait for complete
 	"$script" "$@" &
 	scriptpid=$!
-	wait
+	wait $scriptpid
+	local status=$?
+	scriptpid=
+	trap - INT TERM
+	return $?
 }
 
 # Get dependencties for all relations of the task and args
