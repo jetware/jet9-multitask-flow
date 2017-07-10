@@ -161,11 +161,11 @@ task_execute() {
 	# run script with args argument, save it's pid to kill it if needed, and wait for complete
 	"$script" "$@" &
 	scriptpid=$!
-	wait $scriptpid
+	wait_sure $scriptpid
 	local status=$?
 	scriptpid=
 	trap - INT TERM
-	return $?
+	return $status
 }
 
 # Get dependencties for all relations of the task and args
@@ -196,7 +196,8 @@ task_dependencies() {
 	eval script=\$path_$task
 	if [ -x $script ]; then
 		dependencies=$($script $relation "$@" 2>/dev/null)
-		[ $? -eq 0 ] || return
+		local status=$?
+		[ $status -eq 0 ] || return $status
 		for dependency in $dependencies; do
 			task_internal $dependency
 			task_dependencies_result="$task_dependencies_result $task_internal_result"
@@ -264,6 +265,25 @@ notice() { if [ "$VERBOSE" -ge 2 ]; then log "$*"; fi }
 info()   { if [ "$VERBOSE" -ge 3 ]; then log "$*"; fi }
 debug()  { if [ "$VERBOSE" -ge 4 ]; then log "$*"; fi }
 log()    { echo "$*" >&2; }
+
+# Some shells returns from wait() not only on the pid exit,
+# but also on SIGCONT, SIGHUP. We use wait_sure() to ensure
+# that we wait stronly for process exit
+wait_sure() {
+	local _status= _pid=
+	if [ $# -eq 0 ]; then
+		wait
+		return
+	fi
+	for _pid in "$@"; do
+		while true; do
+			wait $_pid
+			_status=$?
+			kill -0 $_pid 2>/dev/null || break
+		done
+	done
+	return $_status
+}
 
 
 ## Flow locking  functions
@@ -644,7 +664,7 @@ Environment:
 	# wait all them complete
 
 	debug "wait"
-	wait
+	wait_sure $taskpids
 
 	debug "done"
 }
